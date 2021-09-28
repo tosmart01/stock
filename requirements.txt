@@ -1,0 +1,6 @@
+akshare==0.6.10
+pandas==1.1
+tqdm==4.51.0
+PyMySQL==0.9.3
+tushare==1.2.62
+baostock==0.8.8
