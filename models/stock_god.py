@@ -2,7 +2,7 @@
 # @Time : 2021/9/19 17:09
 # @Author : zhuo.wang
 # @File : stock_god.py
-from os.path import dirname, join
+from os.path import dirname, join, abspath
 
 import pandas as pd
 from glob import glob
@@ -264,10 +264,10 @@ def run():
     return cc
 
 if __name__ == "__main__":
-    base_dir = dirname(dirname(__file__))
+    base_dir = dirname(dirname(abspath(__file__)))
     file_list = glob(join(base_dir,'history_data','*.pkl'))
+    print(file_list)
     file_path = sorted(file_list)[-1]
-    print(file_path)
     df = load_df(file_path)
 
     date_map = dict(zip(df.index, df.date))

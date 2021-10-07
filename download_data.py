@@ -1,5 +1,6 @@
+import time
+
 import tushare as ts
-import baostock as bs
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -14,22 +15,21 @@ from common.utils import collection_error
 
 class Astock_download:
 
-    def __init__(self, start=None, end=None, timeToMarket=20210101,):
+    def __init__(self, start=None, end=None, timeToMarket=20210101,worker=15):
         self.start = start
         self.end = end
         self.lock = Lock()
         self.symbol_list = self.get_stock_code(timeToMarket)
-        self.pool = ThreadPoolExecutor(max_workers=15)
+        self.pool = ThreadPoolExecutor(max_workers=worker)
         self.stock = pd.DataFrame(data=None)
 
     def get_stock_code(self, timeToMarket):
         # symbol = ts.get_stock_basics()
-        bs.login()
         pro = ts.pro_api()
-        symbol = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
+        symbol = pro.query('stock_basic', exchange='', list_status='L',
+                         fields='ts_code,symbol,name,area,industry,list_date')
         symbol =  symbol.query(f"list_date<'{timeToMarket}'")
-        symbol.ts_code = symbol.ts_code.apply(lambda x: x.split('.')[1].lower() + '.' + x.split('.')[0])
-        symbol.set_index('symbol',inplace=True)
+        symbol.set_index('ts_code',inplace=True)
         print(symbol)
 
         return symbol
@@ -54,12 +54,17 @@ class Astock_download:
     @collection_error()
     def down_load(self, code, value, tq):
 
-        # print(code,datetime.now())
-        df = ts.get_hist_data(code, start=self.start, end=self.end)
+        # df = ts.get_hist_data(code, start=self.start, end=self.end)
+        df = ts.pro_bar(ts_code=code, adj='qfq', start_date=self.start, end_date=self.end,ma=[5,10,20])
+        df.rename(columns={
+            "change": "price_change",
+            "trade_date": "date",
+            "pct_chg": "p_change",
+            "vol": "volume"
+        }, inplace=True)
         if df is not None and not df.empty:
-            df.reset_index('date',inplace=True)
             df['symbol'], df['name'], df['industry']  = code, value.name, value.industry
-            df = self.get_pe(value.ts_code,df)
+            df = self.get_pe(value.symbol,df)
             with self.lock:
                 self.stock = self.stock.append(df)  # 一次性获取全部日k线数据
         tq.update(1)
@@ -70,8 +75,13 @@ class Astock_download:
         self.start = self.start if self.start else (today - timedelta(days=360)).strftime('%Y-%m-%d')
         tq = tqdm(range(len(self.symbol_list)), desc='download: ',ncols=80)
         jobs = []
+        count = 0
         for value in self.symbol_list.itertuples():
+            if count == 500:
+                count = 0
+                time.sleep(60)
             jobs.append(self.pool.submit(self.down_load, value.Index, value, tq))
+            count+=1
         for i in jobs:
             try:
                 i.result(10)
@@ -97,7 +107,7 @@ def main(update=True,start='2019-03-01'):
         else:
             max_date = df.date.max()
             start = (pd.to_datetime(max_date) - timedelta(days=5)).date()
-            fs = Astock_download(start=str(start))
+            fs = Astock_download(start=str(start),worker=16)
             fs.get_stock_close()
 
             df = df.append(fs.stock)
