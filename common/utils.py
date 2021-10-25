@@ -1,11 +1,24 @@
+import asyncio
+import functools
+import time
+from contextlib import contextmanager
 from datetime import datetime
 
 import pymysql
+import pandas as pd
 
 from .logger import logger
 from os.path import abspath,dirname,join
 
 BASE_DIR = dirname(dirname(abspath(__file__)))
+
+
+def load_df(file_path):
+    df = pd.read_pickle(file_path)
+    df["date"] = df.date.astype("datetime64")
+    df.sort_values(["symbol", "date"], inplace=True, ignore_index=True)
+    df["turnover"] = df.volume * df.close * 100
+    return df
 
 
 def collection_error(single=True):
@@ -28,6 +41,39 @@ def get_sql(columns, table_name):
     sql = f"insert into {table_name}({insert_col}) values({sql_col})"
     return sql
 
+def timeit(function):
+    if asyncio.iscoroutinefunction(function):
+        @functools.wraps(function)
+        async def wrapped_async(*args, **kwargs):
+            stime = time.time()
+            result = await function(*args, **kwargs)
+            etime = time.time()
+            logger.info(f"{function.__name__} 运行了 {etime-stime}s")
+            return result
+
+        return wrapped_async
+
+    else:
+
+        @functools.wraps(function)
+        def wrapped_sync(*args, **kwargs):
+            stime = time.time()
+            result = function(*args, **kwargs)
+            etime = time.time()
+            logger.info(f"{function.__name__} 运行了 {etime-stime}s")
+            return result
+
+        return wrapped_sync
+
+@contextmanager
+def timeit_manager(msg, ):
+    try:
+        st = time.time()
+        yield
+    except Exception as e:
+        raise e
+    else:
+        logger.info("{} use time {}".format(msg, time.time() - st))
 
 @collection_error(single=False)
 def write_db(df, table_name='',con=None,chunksize=30000,is_delete=True):

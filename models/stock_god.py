@@ -2,7 +2,13 @@
 # @Time : 2021/9/19 17:09
 # @Author : zhuo.wang
 # @File : stock_god.py
+import gc
+import time
+from multiprocessing import Pool
 from os.path import dirname, join, abspath
+
+
+from common.utils import load_df,logger
 
 import pandas as pd
 from glob import glob
@@ -11,6 +17,28 @@ from tqdm import tqdm
 import numpy as np
 
 pd.set_option("display.max_rows", 300 * 5)
+
+base_dir = dirname(dirname(abspath(__file__)))
+file_list = glob(join(base_dir, 'history_data', '*.pkl'))
+print(file_list[-1:])
+file_path = sorted(file_list)[-1]
+df = load_df(file_path)
+
+date_map = dict(zip(df.index, df.date))
+today = datetime.now()
+interval = range(12, 45)
+min_slope = 0.86
+golden_cut = [("G6", 0.618), ("G5", 0.5), ("G3", 0.382), ("G1", 0.191), ("G0", 0)]
+sell_interval = {"G6": 2, "G5": 3, "G3": 4, "G1": 12, "G0": 20}
+win_point = {f"point_{i}": round(1 + i / 100, 2) for i in range(1, 23)}
+loss_point = {f"loss_point_{i}": 2 - round(1 + i / 100, 2) for i in range(1, 23)}
+god_day_range = {
+    "G6": interval[-1] * 0.15,
+    "G5": interval[-1] * 0.50,
+    "G3": interval[-1] * 0.80,
+    "G1": interval[-1] * 1.25,
+    "G0": interval[-1] * 1.6,
+}
 
 
 def gen_total_df(df_slope,date_uniue):
@@ -219,16 +247,22 @@ def gen_slope_df(data):
     return df_slope
 
 
-def load_df(file_path):
-    df = pd.read_pickle(file_path)
-    df["date"] = df.date.astype("datetime64")
-    df.sort_values(["symbol", "date"], inplace=True, ignore_index=True)
-
-    df["turnover"] = df.volume * df.close * 100
-    return df
+def execute(data,stock_name,max_date):
+    date_uniue = list(data.date.unique())
+    df_slope = gen_slope_df(data)
+    slope_max_date = df_slope.end_date.max()
+    if df_slope.empty or slope_max_date >= max_date:
+        return pd.DataFrame(data=None)
+    total = gen_total_df(df_slope, date_uniue)
+    if total.empty:
+        return pd.DataFrame(data=None)
+    result = gen_profits(total, data)
+    result["stock_name"] = stock_name
+    gc.collect()
+    return result
 
 def run():
-    res = []
+
     max_date = df.date.max()
     t = tqdm(
         range(
@@ -240,22 +274,23 @@ def run():
         ),
         ncols=70,
     )
+    pool = Pool(4)
+    jobs = []
     for stock_name, data in df.loc[
         (~df.name.str.contains("ST"))
         #& (~df.symbol.str.startswith("3"))
     ].groupby("name"):
-        t.update(1)
-        date_uniue = list(data.date.unique())
-        df_slope = gen_slope_df(data)
-        slope_max_date = df_slope.end_date.max()
-        if df_slope.empty or slope_max_date >= max_date:
-            continue
-        total = gen_total_df(df_slope, date_uniue)
-        if total.empty:
-            continue
-        result = gen_profits(total, data)
-        result["stock_name"] = stock_name
-        res.append(result)
+        jobs.append(pool.apply_async(execute,args=(data,stock_name,max_date)))
+    pool.close()
+    res = []
+    for job in jobs:
+        try:
+            engine_res = job.get()
+        except Exception:
+            logger.exception("计算异常")
+        else:
+            t.update(1)
+            res.append(engine_res)
 
     cur_close = df.sort_values(['date','name'],ascending=False).drop_duplicates(['name'],keep='first').rename(columns={'name':'stock_name'})[['stock_name','symbol','close']]
     cc = pd.concat(res).merge(cur_close, how='left')
@@ -264,28 +299,9 @@ def run():
     return cc
 
 if __name__ == "__main__":
-    base_dir = dirname(dirname(abspath(__file__)))
-    file_list = glob(join(base_dir,'history_data','*.pkl'))
-    print(file_list)
-    file_path = sorted(file_list)[-1]
-    df = load_df(file_path)
-
-    date_map = dict(zip(df.index, df.date))
-    today = datetime.now()
-    interval = range(12, 45)
-    min_slope = 0.86
-    golden_cut = [("G6", 0.618), ("G5", 0.5), ("G3", 0.382), ("G1", 0.191), ("G0", 0)]
-    sell_interval = {"G6": 2, "G5": 3, "G3": 4, "G1": 12, "G0": 20}
-    win_point = {f"point_{i}":round(1 + i/100,2) for i in range(1,23)}
-    loss_point = {f"loss_point_{i}": 2 - round(1 + i / 100, 2) for i in range(1, 23)}
-    god_day_range = {
-        "G6": 8,
-        "G5": interval[-1] * 0.5,
-        "G3": interval[-1] * 0.8,
-        "G1": interval[-1] * 1.2,
-        "G0": interval[-1] * 2,
-    }
-
+    st = time.time()
+    logger.info('start')
     res = run()
-
     res.to_pickle(join(base_dir,'results','god.pkl'))
+
+    logger.info(f'use time:{(time.time() -st ) // 60}')

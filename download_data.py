@@ -79,7 +79,7 @@ class Astock_download:
         for value in self.symbol_list.itertuples():
             if count == 500:
                 count = 0
-                time.sleep(60)
+                time.sleep(65)
             jobs.append(self.pool.submit(self.down_load, value.Index, value, tq))
             count+=1
         for i in jobs:
