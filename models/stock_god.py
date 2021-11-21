@@ -26,8 +26,8 @@ df = load_df(file_path)
 
 date_map = dict(zip(df.index, df.date))
 today = datetime.now()
-interval = range(12, 45)
-min_slope = 0.86
+interval = range(12, 110)
+min_slope = 0.81
 golden_cut = [("G6", 0.618), ("G5", 0.5), ("G3", 0.382), ("G1", 0.191), ("G0", 0)]
 sell_interval = {"G6": 2, "G5": 3, "G3": 4, "G1": 12, "G0": 20}
 win_point = {f"point_{i}": round(1 + i / 100, 2) for i in range(1, 23)}
@@ -82,7 +82,7 @@ def get_buy_data(name,data,row):
     else:
         buy_data = (
             data.loc[
-                (data.low <= row[name])
+                (data.low * 0.992 <= row[name])
                 & (data.high >= row[name])
                 & (data.date > row.end_date)
                 ]
@@ -112,16 +112,16 @@ def shadow_line(data:pd.DataFrame) -> bool:
     '''
     is_shadow = False
     for index,row in data.iterrows():
+        p_change = row.close > row.open
         try:
-            if row.p_change < 0:
-                is_shadow = (row.close - row.low) / (row.open - row.close)>= 0.5
+            if not p_change:
+                is_shadow = (row.close - row.low) / (row.open - row.close)>= 0.3
             else:
-                is_shadow = (row.open - row.low) / (row.close - row.open) >= 0.5
+                is_shadow = (row.open - row.low) / (row.close - row.open) >= 0.3
         except ZeroDivisionError:
             continue
         if is_shadow:
             return is_shadow
-
     return is_shadow
 
 
@@ -157,7 +157,7 @@ def gen_profits(total, data):
             if (data.loc[buy_index - 5:buy_index].p_change.sum() <= -8):
                 is_oversold = True
 
-            is_shadow = shadow_line(data.loc[buy_index:buy_index])
+            is_shadow = shadow_line(data.loc[buy_index - 1:buy_index])
             # 如果是最近发生的买点，则记录nan
             if buy_index + sell_interval[name] > data.index.max():
                 sell_date = today
