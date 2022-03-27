@@ -2,32 +2,29 @@
 # @Time : 2021/9/19 17:09
 # @Author : zhuo.wang
 # @File : stock_god.py
+import sys
+sys.path.append('E:\work_dir\workFile\stockProject')
 import gc
 import time
 from multiprocessing import Pool
 from os.path import dirname, join, abspath
 
 
-from common.utils import load_df,logger
+from common.utils import load_df,logger,timeit,BASE_DIR
 
 import pandas as pd
-from glob import glob
 from datetime import datetime
 from tqdm import tqdm
 import numpy as np
 
 pd.set_option("display.max_rows", 300 * 5)
 
-base_dir = dirname(dirname(abspath(__file__)))
-file_list = glob(join(base_dir, 'history_data', '*.pkl'))
-print(file_list[-1:])
-file_path = sorted(file_list)[-1]
-df = load_df(file_path)
+df = load_df()
 
 date_map = dict(zip(df.index, df.date))
 today = datetime.now()
 interval = range(12, 110)
-min_slope = 0.81
+min_slope = 0.82
 golden_cut = [("G6", 0.618), ("G5", 0.5), ("G3", 0.382), ("G1", 0.191), ("G0", 0)]
 sell_interval = {"G6": 2, "G5": 3, "G3": 4, "G1": 12, "G0": 20}
 win_point = {f"point_{i}": round(1 + i / 100, 2) for i in range(1, 23)}
@@ -82,7 +79,7 @@ def get_buy_data(name,data,row):
     else:
         buy_data = (
             data.loc[
-                (data.low * 0.992 <= row[name])
+                (data.low * 0.99 <= row[name])
                 & (data.high >= row[name])
                 & (data.date > row.end_date)
                 ]
@@ -225,8 +222,7 @@ def gen_profits(total, data):
     )
     return result
 
-
-def gen_slope_df(data):
+def gen_slope_df(data,high_dict):
     res = []
     for window in interval:
         open_value = data.open.shift(window - 1)
@@ -240,7 +236,7 @@ def gen_slope_df(data):
         lambda x: date_map.get(x)
     )
     df_slope = df_slope.dropna(subset=["slope"]).sort_values(["end_date"])
-    df_slope["close_price"] = df_slope["index"].apply(lambda x: data.loc[x, "high"])
+    df_slope["close_price"] = df_slope["index"].apply(lambda x: high_dict[x])
     df_slope["start_price"] = df_slope["start_date"].apply(
         lambda x: data.loc[data.date == x, "open"].iloc[0]
     )
@@ -249,7 +245,8 @@ def gen_slope_df(data):
 
 def execute(data,stock_name,max_date):
     date_uniue = list(data.date.unique())
-    df_slope = gen_slope_df(data)
+    high_dict = dict(zip(data.index,data['high']))
+    df_slope = gen_slope_df(data,high_dict)
     slope_max_date = df_slope.end_date.max()
     if df_slope.empty or slope_max_date >= max_date:
         return pd.DataFrame(data=None)
@@ -274,7 +271,7 @@ def run():
         ),
         ncols=70,
     )
-    pool = Pool(4)
+    pool = Pool(3)
     jobs = []
     for stock_name, data in df.loc[
         (~df.name.str.contains("ST"))
@@ -302,6 +299,6 @@ if __name__ == "__main__":
     st = time.time()
     logger.info('start')
     res = run()
-    res.to_pickle(join(base_dir,'results','god.pkl'))
+    res.to_pickle(join(BASE_DIR,'results','god.pkl'))
 
     logger.info(f'use time:{(time.time() -st ) // 60}')

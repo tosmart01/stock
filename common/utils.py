@@ -3,6 +3,7 @@ import functools
 import time
 from contextlib import contextmanager
 from datetime import datetime
+from glob import glob
 
 import pymysql
 import pandas as pd
@@ -13,7 +14,12 @@ from os.path import abspath,dirname,join
 BASE_DIR = dirname(dirname(abspath(__file__)))
 
 
-def load_df(file_path):
+
+def load_df():
+    base_dir = dirname(dirname(abspath(__file__)))
+    file_list = glob(join(base_dir, 'history_data', '*.pkl'))
+    print(file_list[-1:])
+    file_path = sorted(file_list)[-1]
     df = pd.read_pickle(file_path)
     df["date"] = df.date.astype("datetime64")
     df.sort_values(["symbol", "date"], inplace=True, ignore_index=True)

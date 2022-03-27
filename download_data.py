@@ -77,7 +77,7 @@ class Astock_download:
         jobs = []
         count = 0
         for value in self.symbol_list.itertuples():
-            if count == 500:
+            if count == 200:
                 count = 0
                 time.sleep(65)
             jobs.append(self.pool.submit(self.down_load, value.Index, value, tq))
